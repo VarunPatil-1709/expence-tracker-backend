@@ -1,0 +1,135 @@
+version: "3"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.4
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.4
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092" # Internal for Docker
+      - "9093:9093" # External for Host/Windows
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+
+      # LISTENERS
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093
+
+      # Advertise both listeners
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/kafka/9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mysql:
+    image: mysql:8.3.0
+    container_name: mysql-8.3.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_PASSWORD: password
+      MYSQL_DATABASE: ExpenceTracker
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-db:/var/lib/mysql
+
+  user-service:
+    image: user-service
+    container_name: user-service
+    ports:
+      - "9810:9810"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_started
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: ExpenceTracker
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      SERVER_PORT: 9810
+
+  expence-service:
+    image: expence-service
+    container_name: expence-service
+    ports:
+      - "9880:9880"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_started
+      user-service:
+        condition: service_started
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: expenseservice
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      SERVER_PORT: 9880
+
+  ds-service:
+    image: ds-service
+    container_name: ds-service
+    ports:
+      - "8010:8010"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_started
+      expence-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+    environment:
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      GROQ_API_KEY: your_groq_api_key_here
+
+  auth-service:
+    image: auth-service
+    container_name: auth-service
+    ports:
+      - "9898:9898"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_started
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: ExpenceTracker
+      MYSQL_USER: root
+      MYSQL_PASSWORD: password
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      SERVER_PORT: 9898
+
+volumes:
+  mysql-db:
+    driver: local
